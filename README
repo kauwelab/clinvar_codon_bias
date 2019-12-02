@@ -1,0 +1,42 @@
+README
+
+Step-by-step commands to replicate our analyses. All downloads were done on 11/19/2019.
+The ClinVar file was last updated on 11/18/2019. 
+The gff3 annoatation file was last updated on 09/05/2019.
+The fna fasta file contains GRCh38.p13
+
+Step 1: Download ClinVar from https://www.ncbi.nlm.nih.gov/genome/guide/human/
+    Download Reference Genome Sequence (fasta) and RefSeq Reference Genome Annotation (gff3)
+    wget ftp://ftp.ncbi.nlm.nih.gov/refseq/H_sapiens/annotation/GRCh38_latest/refseq_identifiers/GRCh38_latest_genomic.gff.gz
+    wget ftp://ftp.ncbi.nlm.nih.gov/refseq/H_sapiens/annotation/GRCh38_latest/refseq_identifiers/GRCh38_latest_genomic.fna.gz
+    wget ftp://ftp.ncbi.nlm.nih.gov/refseq/H_sapiens/annotation/GRCh38_latest/refseq_identifiers/GRCh38_latest_clinvar.vcf.gz
+
+Step 2: Extract CDS regions and change chromosome 23 to X, 24 to Y, and 12920 to MT (2-3 minutes):
+    python3 scripts/gff3_parser.py -g GRCh38_latest_genomic.gff.gz -f GRCh38_latest_genomic.fna.gz -o GRCh38_latest_genomic_CDS.fa -s
+
+Step 3: Extract variants within CDS regions (30 seconds):
+    python3 scripts/extractCDSVariants.py -i GRCh38_latest_genomic_CDS.fa -c GRCh38_latest_clinvar.vcf.gz -o clinvar_CDS
+
+Step 4: make a combined fasta file (30 minutes. File created is 2.9G uses 32G of RAM)
+    python3 scripts/makeCombinedFastaForEachVariant.py -c GRCh38_latest_genomic_CDS.fa -i clinvar_CDS_variants -o clinvar_combined_fasta
+    Output File Format:
+        Lines 1-2: Reference Sequence
+        Lines 3-4: Alternative Sequence for mutation at given location
+
+Step 5: Calculate Ramp Sequences:
+    Step 5a: Get longest isoforms from GRCh38:
+        python3 scripts/getLongestIsoform.py -i GRCh38_latest_genomic_CDS.fa -o GRCh38_latest_genomic_longest_isoforms.fa
+    Step 5b: Identify Ramp Sequences (220 minutes of compute time. However, it is multithreaded, so using 10 cores it took about 26 minutes):
+        python3 scripts/ExtRamp.py -u GRCh38_latest_genomic_longest_isoforms.fa -i clinvar_combined_fasta -o clinvar_ramps
+    Step 5c: Get ramps that were either created or destroyed
+        python3 scripts/getDifferentRamps.py -i clinvar_ramps -r clinvar_combined_fasta -o clinvar_ramp_existence
+        
+Step 6: Calculate Codon Aversion and Codon Pairing Changes (about 40 minutes)
+    python3 scripts/getCodonAversionChanges.py -i clinvar_combined_fasta  -e -a clinvar_codon_aversion -o clinvar_codon_pairing
+
+Step 7: Determine overlap in variants affecting codon usage dynamics for each level of annotated support. Creates a directory of directories in comparisons
+    Step 7a: Calculate overlap of variants:
+        python3 scripts/combineCodonBiases.py -r clinvar_ramps -a clinvar_codon_aversion -p clinvar_codon_pairing -o comparisons
+    Step 7b: Calculate total variants from ClinVar:
+        python3 scripts/combineCodonBiases.py -f clinvar_combined_fasta -o comparisons
+
